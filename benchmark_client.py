@@ -3,6 +3,7 @@ import numpy as np
 import time
 import argparse
 from collections import deque
+from tqdm import tqdm # tqdm 임포트
 
 # Triton 서버 정보 (FastAPI도 이 포맷으로 통신 가능)
 TRITON_SERVER_URL = "localhost:8000"
@@ -33,7 +34,8 @@ def run_benchmark(server_url, model_name, model_version, num_requests, batch_siz
 
         start_time = time.time()
 
-        for i in range(num_requests):
+        # tqdm 적용
+        for i in tqdm(range(num_requests), desc="Benchmarking"):
             # 더미 이미지 생성 (배치 크기, 3채널, 이미지 크기 x 이미지 크기)
             input_image_data = np.random.rand(batch_size, 3, image_size, image_size).astype(np.float32)
 
@@ -61,8 +63,9 @@ def run_benchmark(server_url, model_name, model_version, num_requests, batch_siz
             # 응답 데이터 확인 (선택 사항, 성능에 영향)
             # _ = response.as_numpy(f"output_{BIT_LIST[-1]}_bit")
 
-            if (i + 1) % 10 == 0:
-                print(f"  Processed {i + 1}/{num_requests} requests...")
+            # tqdm을 사용하므로 이 부분은 필요 없습니다.
+            # if (i + 1) % 10 == 0:
+            #     print(f"  Processed {i + 1}/{num_requests} requests...")
 
         end_time = time.time()
         total_duration_sec = end_time - start_time

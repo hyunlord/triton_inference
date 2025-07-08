@@ -49,7 +49,7 @@ config = {
 }
 
 # 모델 로드 및 TorchScript 변환
-checkpoint_path = "/Users/rexxa.som/Downloads/deep_hashing/last.ckpt"
+checkpoint_path = "/hanmail/users/rexxa.som/jupyter/my_checkpoints3/lask.ckpt"
 output_path = "/Users/rexxa.som/github/triton_inference/triton_models/deep_hashing/1/model.pt"
 
 # 1. 체크포인트를 로드하기 위한 원래 DeepHashingModel (LightningModule) 정의
