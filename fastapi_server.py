@@ -1,5 +1,5 @@
 import os
-from fastapi import FastAPI, UploadFile, File, HTTPException, Request # Request 임포트
+from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from pydantic import BaseModel
 import uvicorn
 import torch
@@ -96,14 +96,12 @@ async def load_model():
             features = self.vision_model(images).last_hidden_state.mean(dim=1)
             outputs = self.nhl(features)
             return outputs
-        def training_step(self, batch, batch_idx):
-            return torch.tensor(0.0)
-        def validation_step(self, batch, batch_idx):
-            return torch.tensor(0.0)
-        def configure_optimizers(self):
-            return torch.optim.AdamW(self.parameters(), lr=0.001)
+        def training_step(self, batch, batch_idx): return torch.tensor(0.0)
+        def validation_step(self, batch, batch_idx): return torch.tensor(0.0)
+        def configure_optimizers(self): return torch.optim.AdamW(self.parameters(), lr=0.001)
 
-    checkpoint_path = "/hanmail/users/rexxa.som/jupyter/my_checkpoints3/last.ckpt"
+    checkpoint_path = "/Users/rexxa.som/Downloads/deep_hashing/last.ckpt" # Ensure this path is correct
+
     try:
         lightning_model = OriginalDeepHashingModel.load_from_checkpoint(checkpoint_path, config=config, map_location='cpu')
         lightning_model.eval()
@@ -121,25 +119,33 @@ async def load_model():
 # Triton-compatible health check endpoints
 @app.get("/v2/health/ready")
 async def health_ready():
+    print(f"DEBUG: /v2/health/ready endpoint hit. model_ready={model_ready}")
     if model_ready:
         return {"status": "ok"}
     raise HTTPException(status_code=503, detail="Model not ready")
 
 @app.get("/v2/models/{model_name}/ready")
 async def model_ready_check(model_name: str):
+    print(f"DEBUG: /v2/models/{model_name}/ready endpoint hit. model_name={model_name}, config_model_name={config['model_name']}, model_ready={model_ready}")
     if model_name == config["model_name"] and model_ready:
         return {"status": "ok"}
     raise HTTPException(status_code=503, detail=f"Model '{model_name}' not ready")
 
 @app.post("/v2/models/{model_name}/versions/{model_version}/infer")
-async def infer(model_name: str, model_version: str, request: Request): # request: Request로 변경
+async def infer(model_name: str, model_version: str, request: Request):
+    print(f"DEBUG: /v2/models/{model_name}/versions/{model_version}/infer endpoint hit.")
+    print(f"DEBUG: model_name={model_name}, model_version={model_version}")
+    print(f"DEBUG: Expected model_name={config['model_name']}, expected model_version=1")
+
     if model_name != config["model_name"] or model_version != "1":
+        print("DEBUG: Model name or version mismatch detected!")
         raise HTTPException(status_code=404, detail="Model not found")
-    if not model_ready: # model_ready 플래그 사용
+    if not model_ready:
+        print("DEBUG: Model not ready flag is False!")
         raise HTTPException(status_code=503, detail="Model not loaded yet")
 
     try:
-        request_body = await request.body() # 요청 본문 직접 읽기
+        request_body = await request.body()
         
         input_np = np.frombuffer(request_body, dtype=np.float32).reshape(-1, 3, config["image_size"], config["image_size"])
         
@@ -153,6 +159,7 @@ async def infer(model_name: str, model_version: str, request: Request): # reques
         return output_128_bit_np.tobytes()
 
     except Exception as e:
+        print(f"DEBUG: Inference error in infer endpoint: {e}")
         raise HTTPException(status_code=500, detail=f"Inference error: {e}")
 
 if __name__ == "__main__":
