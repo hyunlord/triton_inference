@@ -36,11 +36,13 @@ def send_inference_request_triton(triton_client, model_name, model_version, batc
             model_name=model_name,
             inputs=inputs,
             outputs=outputs,
-            model_version=model_version
+            model_version=model_version,
+            client_timeout=10.0 # 10초 타임아웃 추가
         )
         _ = response.as_numpy(f"output_{bit_list_last_element}_bit")
         success = True
     except Exception as e:
+        print(f"Triton inference failed: {e}") # 오류 메시지 출력
         success = False
     request_end_time = time.time()
 

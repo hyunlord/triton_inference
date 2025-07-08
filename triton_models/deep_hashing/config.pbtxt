@@ -43,9 +43,9 @@ output [
 ]
 instance_group [
   {
-    kind: KIND_GPU
-    count: 1
-    gpus: [ 0, 1, 2, 3 ]
+    kind: KIND_CPU # Changed from KIND_GPU
+    count: 1 # 1 CPU instance is usually enough for CPU
+    # gpus: [ 0, 1, 2, 3 ] # Removed for KIND_CPU
   }
 ]
 dynamic_batching {
