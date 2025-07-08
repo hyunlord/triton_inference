@@ -96,12 +96,14 @@ async def load_model():
             features = self.vision_model(images).last_hidden_state.mean(dim=1)
             outputs = self.nhl(features)
             return outputs
-        def training_step(self, batch, batch_idx): return torch.tensor(0.0)
-        def validation_step(self, batch, batch_idx): return torch.tensor(0.0)
-        def configure_optimizers(self): return torch.optim.AdamW(self.parameters(), lr=0.001)
+        def training_step(self, batch, batch_idx):
+            return torch.tensor(0.0)
+        def validation_step(self, batch, batch_idx):
+            return torch.tensor(0.0)
+        def configure_optimizers(self):
+            return torch.optim.AdamW(self.parameters(), lr=0.001)
 
-    checkpoint_path = "/Users/rexxa.som/Downloads/deep_hashing/last.ckpt" # Ensure this path is correct
-
+    checkpoint_path = "/hanmail/users/rexxa.som/jupyter/my_checkpoints3/last.ckpt"
     try:
         lightning_model = OriginalDeepHashingModel.load_from_checkpoint(checkpoint_path, config=config, map_location='cpu')
         lightning_model.eval()
