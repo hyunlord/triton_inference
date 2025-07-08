@@ -24,10 +24,10 @@ def send_inference_request_triton(triton_client, model_name, model_version, batc
 
     inputs = []
     inputs.append(httpclient.InferInput("images", input_image_data.shape, "FP32"))
-    inputs[0].set_data_from_numpy(input_image_data, binary_data=True)
+    inputs[0].set_data_from_numpy(input_image_data, binary_data=False) # binary_data=False로 변경
 
     outputs = []
-    outputs.append(httpclient.InferRequestedOutput(f"output_{bit_list_last_element}_bit", binary_data=True))
+    outputs.append(httpclient.InferRequestedOutput(f"output_{bit_list_last_element}_bit", binary_data=False)) # 출력도 False로 변경
 
     request_start_time = time.time()
     success = False
