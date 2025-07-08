@@ -105,18 +105,18 @@ class DeepHashingModelForInference(nn.Module):
 
 
 # 3. 체크포인트를 OriginalDeepHashingModel에 로드
-lightning_model = OriginalDeepHashingModel.load_from_checkpoint(checkpoint_path, config=config, map_location='cpu')
+lightning_model = OriginalDeepHashingModel.load_from_checkpoint(checkpoint_path, config=config, map_location='cuda:0')
 lightning_model.eval()
-lightning_model.to('cpu')
+lightning_model.to('cuda:0')
 
 # 4. 추론 전용 모델 인스턴스 생성 및 학습된 가중치 로드
 inference_model = DeepHashingModelForInference(config)
 inference_model.load_state_dict(lightning_model.state_dict()) # Lightning 모델의 가중치를 로드
 inference_model.eval()
-inference_model.to('cpu')
+inference_model.to('cuda:0')
 
 # 더미 입력 생성
-dummy_input = torch.randn(1, 3, config["image_size"], config["image_size"], device='cpu')
+dummy_input = torch.randn(1, 3, config["image_size"], config["image_size"], device='cuda:0')
 
 # 5. 추론 전용 모델을 TorchScript로 트레이스
 traced_model = torch.jit.trace(inference_model, dummy_input)
