@@ -5,9 +5,9 @@ import argparse
 from collections import deque
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import requests # 추가
-import json
-from base64 import b64encode, b64decode # 추가
+import requests
+import ujson as json # ujson 사용
+from base64 import b64encode, b64decode # b64decode 추가
 
 # Triton 서버 정보 (FastAPI도 이 포맷으로 통신 가능)
 TRITON_SERVER_URL = "localhost:8000"
@@ -30,24 +30,29 @@ def send_inference_request_triton(triton_client, model_name, model_version, batc
     outputs.append(httpclient.InferRequestedOutput(f"output_{bit_list_last_element}_bit", binary_data=True))
 
     request_start_time = time.time()
-    response = triton_client.infer(
-        model_name=model_name,
-        inputs=inputs,
-        outputs=outputs,
-        model_version=model_version
-    )
+    success = False
+    try:
+        response = triton_client.infer(
+            model_name=model_name,
+            inputs=inputs,
+            outputs=outputs,
+            model_version=model_version
+        )
+        # 응답 파싱을 통해 실제 오류 여부 확인
+        _ = response.as_numpy(f"output_{bit_list_last_element}_bit")
+        success = True
+    except Exception as e:
+        # print(f"Triton inference failed: {e}") # 디버깅을 위해 주석 해제 가능
+        success = False
     request_end_time = time.time()
 
     latency_ms = (request_end_time - request_start_time) * 1000
-    # 응답 데이터 확인 (선택 사항, 성능에 영향)
-    _ = response.as_numpy(f"output_{bit_list_last_element}_bit") # 응답 파싱 포함
-    return latency_ms, batch_size
+    return latency_ms, batch_size, success
 
 def send_inference_request_fastapi(server_url, model_name, model_version, batch_size, image_size, bit_list_last_element):
     """FastAPI 서버에 단일 추론 요청을 보내고 지연 시간을 반환합니다."""
     input_image_data = np.random.rand(batch_size, 3, image_size, image_size).astype(np.float32)
 
-    # NumPy 배열을 Base64로 인코딩하여 JSON 페이로드 생성
     encoded_input = b64encode(input_image_data.tobytes()).decode('utf-8')
     
     payload = {
@@ -65,41 +70,43 @@ def send_inference_request_fastapi(server_url, model_name, model_version, batch_
     url = f"{server_url}/v2/models/{model_name}/versions/{model_version}/infer"
 
     request_start_time = time.time()
-    response = requests.post(url, headers=headers, data=json.dumps(payload))
+    success = False
+    try:
+        response = requests.post(url, headers=headers, data=json.dumps(payload))
+        if response.status_code == 200:
+            response_json = response.json()
+            # 응답 파싱을 통해 실제 오류 여부 확인
+            output_data_json = response_json["outputs"][0]["data"][0]
+            decoded_output = b64decode(output_data_json)
+            _ = np.frombuffer(decoded_output, dtype=np.float32).reshape(response_json["outputs"][0]["shape"])
+            success = True
+        else:
+            # print(f"FastAPI server returned non-200 status: {response.status_code} - {response.text}") # 디버깅을 위해 주석 해제 가능
+            success = False
+    except Exception as e:
+        # print(f"FastAPI request failed: {e}") # 디버깅을 위해 주석 해제 가능
+        success = False
     request_end_time = time.time()
 
     latency_ms = (request_end_time - request_start_time) * 1000
-
-    if response.status_code != 200:
-        raise Exception(f"FastAPI server returned error: {response.status_code} - {response.text}")
-    
-    # 응답 데이터 확인 (선택 사항, 성능에 영향)
-    response_json = response.json()
-    
-    output_data_json = response_json["outputs"][0]["data"][0]
-    decoded_output = b64decode(output_data_json)
-    _ = np.frombuffer(decoded_output, dtype=np.float32).reshape(response_json["outputs"][0]["shape"])
-
-    return latency_ms, batch_size
+    return latency_ms, batch_size, success
 
 def run_benchmark(server_url, model_name, model_version, num_requests, batch_size, image_size, num_concurrent_clients, server_type):
     latencies = deque() # 밀리초 단위
     total_images_processed = 0
+    successful_requests = 0
+    failed_requests = 0
 
     try:
         if server_type == "triton":
-            # URL에서 스킴 제거
             parsed_url = server_url.replace("http://", "").replace("https://", "")
-            client_instance = httpclient.InferenceServerClient(url=parsed_url)
+            triton_client = httpclient.InferenceServerClient(url=parsed_url, verbose=True) # verbose=True 추가
             send_request_func = send_inference_request_triton
-            # Triton client의 헬스 체크 사용
             print(f"Checking server readiness: {client_instance.is_server_ready()}")
             print(f"Checking model readiness for {model_name}: {client_instance.is_model_ready(model_name)}")
         elif server_type == "fastapi":
-            # FastAPI는 requests 라이브러리를 직접 사용하므로 별도의 클라이언트 인스턴스 불필요
-            client_instance = None # 더미
+            client_instance = None # Dummy for FastAPI
             send_request_func = send_inference_request_fastapi
-            # FastAPI의 헬스 체크는 requests로 직접 호출
             try:
                 health_resp = requests.get(f"{server_url}/v2/health/ready")
                 model_health_resp = requests.get(f"{server_url}/v2/models/{model_name}/ready")
@@ -131,27 +138,42 @@ def run_benchmark(server_url, model_name, model_version, num_requests, batch_siz
                     futures.append(executor.submit(send_request_func, server_url, model_name, model_version, batch_size, image_size, BIT_LIST[-1]))
 
             for future in tqdm(as_completed(futures), total=num_requests, desc="Benchmarking"):
-                latency_ms, processed_batch_size = future.result()
-                latencies.append(latency_ms)
-                total_images_processed += processed_batch_size
+                latency_ms, processed_batch_size, success = future.result()
+                if success:
+                    latencies.append(latency_ms)
+                    total_images_processed += processed_batch_size
+                    successful_requests += 1
+                else:
+                    failed_requests += 1
 
         end_time = time.time()
         total_duration_sec = end_time - start_time
 
-        all_latencies = np.array(latencies)
-        avg_latency_ms = np.mean(all_latencies)
-        p90_latency_ms = np.percentile(all_latencies, 90)
-        p95_latency_ms = np.percentile(all_latencies, 95)
-        p99_latency_ms = np.percentile(all_latencies, 99)
+        # Calculate results only if there are successful requests
+        if successful_requests > 0:
+            all_latencies = np.array(latencies)
+            avg_latency_ms = np.mean(all_latencies)
+            std_latency_ms = np.std(all_latencies) # 지연 시간 표준 편차 추가
+            p90_latency_ms = np.percentile(all_latencies, 90)
+            p95_latency_ms = np.percentile(all_latencies, 95)
+            p99_latency_ms = np.percentile(all_latencies, 99)
+        else:
+            avg_latency_ms = p90_latency_ms = p95_latency_ms = p99_latency_ms = float('nan')
+            std_latency_ms = float('nan')
 
         rps = num_requests / total_duration_sec
         ips = total_images_processed / total_duration_sec
+        error_rate = (failed_requests / num_requests) * 100 if num_requests > 0 else 0
 
         print(f"\n--- Benchmark Results ---")
         print(f"Total duration: {total_duration_sec:.2f} seconds")
-        print(f"Total requests: {num_requests}")
+        print(f"Total requests sent: {num_requests}")
+        print(f"Successful requests: {successful_requests}")
+        print(f"Failed requests: {failed_requests}")
+        print(f"Error Rate: {error_rate:.2f}%")
         print(f"Total images processed: {total_images_processed}")
         print(f"Average Latency: {avg_latency_ms:.2f} ms/request")
+        print(f"Standard Deviation of Latency: {std_latency_ms:.2f} ms") # 표준 편차 출력
         print(f"P90 Latency: {p90_latency_ms:.2f} ms/request")
         print(f"P95 Latency: {p95_latency_ms:.2f} ms/request")
         print(f"P99 Latency: {p99_latency_ms:.2f} ms/request")

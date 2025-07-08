@@ -41,3 +41,10 @@ output [
     dims: [ 128 ]
   }
 ]
+instance_group [
+  {
+    kind: KIND_GPU
+    count: 1
+    gpus: [ 0, 1, 2, 3 ]
+  }
+]
