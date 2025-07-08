@@ -97,7 +97,7 @@ def run_benchmark(server_url, model_name, model_version, num_requests, batch_siz
     try:
         if server_type == "triton":
             parsed_url = server_url.replace("http://", "").replace("https://", "")
-            client_instance = httpclient.InferenceServerClient(url=parsed_url, verbose=True)
+            triton_client = httpclient.InferenceServerClient(url=parsed_url, verbose=False)
             send_request_func = send_inference_request_triton
             print(f"Checking server readiness: {client_instance.is_server_ready()}")
             print(f"Checking model readiness for {model_name}: {client_instance.is_model_ready(model_name)}")
