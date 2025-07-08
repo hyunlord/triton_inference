@@ -1,5 +1,5 @@
 import os
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Request # Request 임포트
 from pydantic import BaseModel
 import uvicorn
 import torch
@@ -73,19 +73,15 @@ app = FastAPI()
 # Global model variable
 model = None
 device = None
+model_ready = False
 
 @app.on_event("startup")
 async def load_model():
-    global model, device
-    # Determine device (CPU or GPU)
-    # For CPU only: device = torch.device("cpu")
-    # For GPU if available, else CPU:
+    global model, device, model_ready
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Loading model on device: {device}")
 
-    # Load the checkpoint using the OriginalDeepHashingModel (LightningModule)
-    # This is needed because load_from_checkpoint expects the LightningModule structure
-    from pytorch_lightning import LightningModule # Import here to avoid circular dependency if model.py is separate
+    from pytorch_lightning import LightningModule
     class OriginalDeepHashingModel(LightningModule):
         def __init__(self, config):
             super().__init__()
@@ -100,104 +96,62 @@ async def load_model():
             features = self.vision_model(images).last_hidden_state.mean(dim=1)
             outputs = self.nhl(features)
             return outputs
-        def training_step(self, batch, batch_idx):
-            return torch.tensor(0.0)
-        def validation_step(self, batch, batch_idx):
-            return torch.tensor(0.0)
-        def configure_optimizers(self):
-            return torch.optim.AdamW(self.parameters(), lr=0.001)
+        def training_step(self, batch, batch_idx): return torch.tensor(0.0)
+        def validation_step(self, batch, batch_idx): return torch.tensor(0.0)
+        def configure_optimizers(self): return torch.optim.AdamW(self.parameters(), lr=0.001)
 
+    checkpoint_path = "/Users/rexxa.som/Downloads/deep_hashing/last.ckpt" # Ensure this path is correct
 
-    checkpoint_path = "/hanmail/users/rexxa.som/jupyter/my_checkpoints3/last.ckpt"
-    lightning_model = OriginalDeepHashingModel.load_from_checkpoint(checkpoint_path, config=config, map_location='cpu')
-    lightning_model.eval()
-    
-    # Create the inference-only model and load state dict
-    model = DeepHashingModelForInference(config)
-    model.load_state_dict(lightning_model.state_dict())
-    model.eval()
-    model.to(device)
-    print("Model loaded successfully.")
+    try:
+        lightning_model = OriginalDeepHashingModel.load_from_checkpoint(checkpoint_path, config=config, map_location='cpu')
+        lightning_model.eval()
+        
+        model = DeepHashingModelForInference(config)
+        model.load_state_dict(lightning_model.state_dict())
+        model.eval()
+        model.to(device)
+        model_ready = True
+        print("Model loaded successfully.")
+    except Exception as e:
+        print(f"Error loading model: {e}")
+        model_ready = False
 
-@app.get("/health")
-async def health_check():
-    if model is not None:
-        return {"status": "ready", "model_loaded": True, "device": str(device)}
-    return {"status": "loading", "model_loaded": False}
+# Triton-compatible health check endpoints
+@app.get("/v2/health/ready")
+async def health_ready():
+    if model_ready:
+        return {"status": "ok"}
+    raise HTTPException(status_code=503, detail="Model not ready")
+
+@app.get("/v2/models/{model_name}/ready")
+async def model_ready_check(model_name: str):
+    if model_name == config["model_name"] and model_ready:
+        return {"status": "ok"}
+    raise HTTPException(status_code=503, detail=f"Model '{model_name}' not ready")
 
 @app.post("/v2/models/{model_name}/versions/{model_version}/infer")
-async def infer(model_name: str, model_version: str, request_body: bytes = File(...)):
+async def infer(model_name: str, model_version: str, request: Request): # request: Request로 변경
     if model_name != config["model_name"] or model_version != "1":
         raise HTTPException(status_code=404, detail="Model not found")
-    if model is None:
+    if not model_ready: # model_ready 플래그 사용
         raise HTTPException(status_code=503, detail="Model not loaded yet")
 
-    # Triton client sends binary data directly.
-    # The request_body will contain the raw bytes of the numpy array.
-    # We need to reconstruct the numpy array from bytes.
-    # This assumes the client sends a single 'images' input.
-    
-    # For simplicity, assuming the client sends a numpy array directly as bytes
-    # In a real scenario, you might need a more robust parsing (e.g., using a custom Pydantic model
-    # or a more complex request body if multiple inputs/outputs are involved).
     try:
-        # Reconstruct numpy array from bytes
-        # This requires knowing the shape and dtype from the client side.
-        # For this benchmark, we know it's (N, 3, IMAGE_SIZE, IMAGE_SIZE) FP32
+        request_body = await request.body() # 요청 본문 직접 읽기
+        
         input_np = np.frombuffer(request_body, dtype=np.float32).reshape(-1, 3, config["image_size"], config["image_size"])
         
-        # Move to torch tensor and device
         input_tensor = torch.from_numpy(input_np).to(device)
 
-        # Perform inference
         with torch.no_grad():
-            # Measure pure model inference time
-            inference_start_time = time.time()
             outputs_tuple = model(input_tensor)
-            inference_end_time = time.time()
-            model_inference_latency_ms = (inference_end_time - inference_start_time) * 1000
 
-        # Prepare response in a format compatible with tritonclient.http.InferResult
-        # Triton client expects a specific JSON structure for HTTP/REST API
-        # For benchmarking, we just need to ensure the output is correctly generated.
-        
-        # Convert tuple of tensors to list of numpy arrays
-        output_nps = [output.cpu().numpy() for output in outputs_tuple]
-
-        # Construct a simplified response for benchmarking purposes
-        # The benchmark client only checks for successful response, not content.
-        # If you need to return actual data, you'd structure it like Triton's JSON output.
-        
-        # Example of a minimal valid response for tritonclient.http
-        # This is not a full Triton REST API response, but enough for the client to parse.
-        # For this benchmark, we just need to return something that doesn't error out.
-        
-        # For the benchmark client, we just need a successful HTTP 200 response.
-        # The client's `response.as_numpy()` will try to parse the binary data.
-        # So, we need to return the binary data directly.
-        
-        # Ensure the output is the 128-bit hash, as requested by the client.
-        # The client requests f"output_{BIT_LIST[-1]}_bit" which is "output_128_bit"
-        # The model returns a tuple of tensors in order of BIT_LIST.
-        # So, outputs_tuple[-1] corresponds to the 128-bit hash.
-        
-        # Convert the 128-bit output tensor to numpy bytes
         output_128_bit_np = outputs_tuple[-1].cpu().numpy()
         
-        # Return the raw bytes of the numpy array.
-        # The client's `response.as_numpy()` expects this.
         return output_128_bit_np.tobytes()
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Inference error: {e}")
 
 if __name__ == "__main__":
-    # To run on CPU:
-    # uvicorn fastapi_server:app --host 0.0.0.0 --port 8000
-    
-    # To run on GPU (if available):
-    # uvicorn fastapi_server:app --host 0.0.0.0 --port 8000
-    # The load_model() function will automatically detect CUDA if available.
-    
-    # For direct execution (e.g., for testing):
     uvicorn.run(app, host="0.0.0.0", port=8000)
