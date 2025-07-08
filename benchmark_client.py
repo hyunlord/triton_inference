@@ -3,7 +3,8 @@ import numpy as np
 import time
 import argparse
 from collections import deque
-from tqdm import tqdm # tqdm 임포트
+from tqdm import tqdm
+from concurrent.futures import ThreadPoolExecutor, as_completed # 추가
 
 # Triton 서버 정보 (FastAPI도 이 포맷으로 통신 가능)
 TRITON_SERVER_URL = "localhost:8000"
@@ -14,7 +15,32 @@ MODEL_VERSION = "1"
 IMAGE_SIZE = 384
 BIT_LIST = [8, 16, 32, 48, 64, 128]
 
-def run_benchmark(server_url, model_name, model_version, num_requests, batch_size, image_size):
+def send_inference_request(triton_client, model_name, model_version, batch_size, image_size, bit_list_last_element):
+    """단일 추론 요청을 보내고 지연 시간을 반환합니다."""
+    input_image_data = np.random.rand(batch_size, 3, image_size, image_size).astype(np.float32)
+
+    inputs = []
+    inputs.append(httpclient.InferInput("images", input_image_data.shape, "FP32"))
+    inputs[0].set_data_from_numpy(input_image_data, binary_data=True)
+
+    outputs = []
+    outputs.append(httpclient.InferRequestedOutput(f"output_{bit_list_last_element}_bit", binary_data=True))
+
+    request_start_time = time.time()
+    response = triton_client.infer(
+        model_name=model_name,
+        inputs=inputs,
+        outputs=outputs,
+        model_version=model_version
+    )
+    request_end_time = time.time()
+
+    latency_ms = (request_end_time - request_start_time) * 1000
+    # 응답 데이터 확인 (선택 사항, 성능에 영향)
+    # _ = response.as_numpy(f"output_{bit_list_last_element}_bit")
+    return latency_ms, batch_size
+
+def run_benchmark(server_url, model_name, model_version, num_requests, batch_size, image_size, num_concurrent_clients):
     latencies = deque() # 밀리초 단위
     total_images_processed = 0
 
@@ -31,41 +57,18 @@ def run_benchmark(server_url, model_name, model_version, num_requests, batch_siz
         print(f"Number of requests: {num_requests}")
         print(f"Batch size per request: {batch_size}")
         print(f"Image size: {image_size}x{image_size}")
+        print(f"Number of concurrent clients: {num_concurrent_clients}")
 
         start_time = time.time()
 
-        # tqdm 적용
-        for i in tqdm(range(num_requests), desc="Benchmarking"):
-            # 더미 이미지 생성 (배치 크기, 3채널, 이미지 크기 x 이미지 크기)
-            input_image_data = np.random.rand(batch_size, 3, image_size, image_size).astype(np.float32)
+        # ThreadPoolExecutor를 사용하여 동시 요청 생성
+        with ThreadPoolExecutor(max_workers=num_concurrent_clients) as executor:
+            futures = [executor.submit(send_inference_request, triton_client, model_name, model_version, batch_size, image_size, BIT_LIST[-1]) for _ in range(num_requests)]
 
-            inputs = []
-            inputs.append(httpclient.InferInput("images", input_image_data.shape, "FP32"))
-            inputs[0].set_data_from_numpy(input_image_data, binary_data=True)
-
-            outputs = []
-            # 가장 긴 해시 코드만 요청하여 오버헤드 최소화
-            outputs.append(httpclient.InferRequestedOutput(f"output_{BIT_LIST[-1]}_bit", binary_data=True))
-
-            request_start_time = time.time()
-            response = triton_client.infer(
-                model_name=model_name,
-                inputs=inputs,
-                outputs=outputs,
-                model_version=model_version
-            )
-            request_end_time = time.time()
-
-            latency_ms = (request_end_time - request_start_time) * 1000
-            latencies.append(latency_ms)
-            total_images_processed += batch_size
-
-            # 응답 데이터 확인 (선택 사항, 성능에 영향)
-            # _ = response.as_numpy(f"output_{BIT_LIST[-1]}_bit")
-
-            # tqdm을 사용하므로 이 부분은 필요 없습니다.
-            # if (i + 1) % 10 == 0:
-            #     print(f"  Processed {i + 1}/{num_requests} requests...")
+            for future in tqdm(as_completed(futures), total=num_requests, desc="Benchmarking"):
+                latency_ms, processed_batch_size = future.result()
+                latencies.append(latency_ms)
+                total_images_processed += processed_batch_size
 
         end_time = time.time()
         total_duration_sec = end_time - start_time
@@ -108,7 +111,9 @@ if __name__ == "__main__":
                         help="Batch size per inference request")
     parser.add_argument("--image_size", type=int, default=IMAGE_SIZE,
                         help="Image size (height and width) for input")
+    parser.add_argument("--num_concurrent_clients", type=int, default=1,
+                        help="Number of concurrent clients (threads) to simulate concurrent requests")
     args = parser.parse_args()
 
     run_benchmark(args.server_url, args.model_name, args.model_version,
-                  args.num_requests, args.batch_size, args.image_size)
+                  args.num_requests, args.batch_size, args.image_size, args.num_concurrent_clients)
