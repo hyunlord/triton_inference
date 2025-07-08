@@ -50,7 +50,7 @@ class DeepHashingModelForInference(nn.Module):
 config = {
     "dataset_name": "hyunlord/query_image_anchor_positive_large_384",
     "cache_dir": "./.cache",
-    "model_name": "google/siglip2-base-patch16-384",
+    "model_name": "google/siglip2-base-patch16-384", # This must remain for AutoModel.from_pretrained
     "hash_hidden_dim": 512,
     "margin": 0.242047,
     "lambda_ortho": 0.197038,
@@ -69,6 +69,9 @@ config = {
 
 # --- FastAPI App ---
 app = FastAPI()
+
+# Define the name the model is deployed under in Triton/FastAPI
+DEPLOYED_MODEL_NAME = "deep_hashing" # New constant for the deployed model name
 
 # Global model variable
 model = None
@@ -126,8 +129,8 @@ async def health_ready():
 
 @app.get("/v2/models/{model_name}/ready")
 async def model_ready_check(model_name: str):
-    print(f"DEBUG: /v2/models/{model_name}/ready endpoint hit. model_name={model_name}, config_model_name={config['model_name']}, model_ready={model_ready}")
-    if model_name == config["model_name"] and model_ready:
+    print(f"DEBUG: /v2/models/{model_name}/ready endpoint hit. model_name={model_name}, config_model_name={config['model_name']}, deployed_model_name={DEPLOYED_MODEL_NAME}, model_ready={model_ready}")
+    if model_name == DEPLOYED_MODEL_NAME and model_ready:
         return {"status": "ok"}
     raise HTTPException(status_code=503, detail=f"Model '{model_name}' not ready")
 
@@ -135,9 +138,9 @@ async def model_ready_check(model_name: str):
 async def infer(model_name: str, model_version: str, request: Request):
     print(f"DEBUG: /v2/models/{model_name}/versions/{model_version}/infer endpoint hit.")
     print(f"DEBUG: model_name={model_name}, model_version={model_version}")
-    print(f"DEBUG: Expected model_name={config['model_name']}, expected model_version=1")
+    print(f"DEBUG: Expected model_name={DEPLOYED_MODEL_NAME}, expected model_version=1")
 
-    if model_name != config["model_name"] or model_version != "1":
+    if model_name != DEPLOYED_MODEL_NAME or model_version != "1":
         print("DEBUG: Model name or version mismatch detected!")
         raise HTTPException(status_code=404, detail="Model not found")
     if not model_ready:
