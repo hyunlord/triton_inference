@@ -1,13 +1,20 @@
 import subprocess
 import os
 import torch
-import sys # sys 모듈 임포트
+import sys
+import shutil # shutil 모듈 임포트
 
 # 시스템의 GPU 개수 확인
 num_gpus = torch.cuda.device_count()
 
 # 현재 Python 환경의 uvicorn 실행 파일 경로를 찾습니다.
-uvicorn_executable = os.path.join(os.path.dirname(sys.executable), 'uvicorn')
+uvicorn_executable = shutil.which('uvicorn')
+
+if uvicorn_executable is None:
+    print("Error: 'uvicorn' executable not found in PATH.")
+    print("Please ensure uvicorn is installed in your active environment (e.g., 'pip install uvicorn')")
+    print("and that your shell's PATH is correctly configured for your virtual environment.")
+    sys.exit(1) # 스크립트 종료
 
 if num_gpus == 0:
     print("No GPUs found. Running FastAPI on CPU.")
