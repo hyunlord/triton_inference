@@ -108,7 +108,7 @@ async def load_model():
             return torch.optim.AdamW(self.parameters(), lr=0.001)
 
 
-    checkpoint_path = "/hanmail/users/rexxa.som/jupyter/my_checkpoints3/lask.ckpt"
+    checkpoint_path = "/hanmail/users/rexxa.som/jupyter/my_checkpoints3/last.ckpt"
     lightning_model = OriginalDeepHashingModel.load_from_checkpoint(checkpoint_path, config=config, map_location='cpu')
     lightning_model.eval()
     
