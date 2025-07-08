@@ -103,7 +103,7 @@ def run_benchmark(server_url, model_name, model_version, num_requests, batch_siz
         if server_type == "triton":
             parsed_url = server_url.replace("http://", "").replace("https://", "")
             try:
-                client_instance = httpclient.InferenceServerClient(url=parsed_url, verbose=True) # verbose=True로 변경
+                client_instance = httpclient.InferenceServerClient(url=parsed_url, verbose=False) # verbose=True로 변경
             except Exception as client_init_e:
                 print(f"Error initializing Triton client: {client_init_e}")
                 raise
