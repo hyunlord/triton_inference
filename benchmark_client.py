@@ -6,8 +6,8 @@ from collections import deque
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests # 추가
-import ujson as json # 추가
-from base64 import b64encode # 추가
+import json
+from base64 import b64encode, b64decode # 추가
 
 # Triton 서버 정보 (FastAPI도 이 포맷으로 통신 가능)
 TRITON_SERVER_URL = "localhost:8000"
