@@ -10,6 +10,8 @@ from PIL import Image
 from transformers import AutoModel
 import io
 import time
+from base64 import b64decode, b64encode # 추가
+import ujson as json # 추가
 
 # --- Model Definition (from convert_to_torchscript.py) ---
 class NestedHashLayer(nn.Module):
@@ -135,7 +137,7 @@ async def model_ready_check(model_name: str):
     raise HTTPException(status_code=503, detail=f"Model '{model_name}' not ready")
 
 @app.post("/v2/models/{model_name}/versions/{model_version}/infer")
-async def infer(model_name: str, model_version: str, request: Request):
+async def infer(model_name: str, model_version: str, request_body: dict): # request_body: dict로 변경
     print(f"DEBUG: /v2/models/{model_name}/versions/{model_version}/infer endpoint hit.")
     print(f"DEBUG: model_name={model_name}, model_version={model_version}")
     print(f"DEBUG: Expected model_name={DEPLOYED_MODEL_NAME}, expected model_version=1")
@@ -148,9 +150,14 @@ async def infer(model_name: str, model_version: str, request: Request):
         raise HTTPException(status_code=503, detail="Model not loaded yet")
 
     try:
-        request_body = await request.body()
+        # JSON 페이로드에서 Base64 인코딩된 데이터 추출
+        # Triton client의 JSON 요청 구조를 따름
+        input_data_json = request_body["inputs"][0]
+        encoded_data = input_data_json["data"][0] # Assuming single data element in list
+        input_bytes = b64decode(encoded_data)
         
-        input_np = np.frombuffer(request_body, dtype=np.float32).reshape(-1, 3, config["image_size"], config["image_size"])
+        # NumPy 배열로 재구성
+        input_np = np.frombuffer(input_bytes, dtype=np.float32).reshape(input_data_json["shape"])
         
         input_tensor = torch.from_numpy(input_np).to(device)
 
@@ -159,7 +166,23 @@ async def infer(model_name: str, model_version: str, request: Request):
 
         output_128_bit_np = outputs_tuple[-1].cpu().numpy()
         
-        return output_128_bit_np.tobytes()
+        # 출력을 Base64 인코딩하여 JSON 응답으로 반환
+        encoded_output = b64encode(output_128_bit_np.tobytes()).decode('utf-8')
+        
+        # Triton client가 파싱할 수 있는 JSON 응답 형식
+        response_json = {
+            "model_name": DEPLOYED_MODEL_NAME,
+            "model_version": model_version,
+            "outputs": [
+                {
+                    "name": f"output_{config['bit_list'][-1]}_bit", # 128-bit output
+                    "datatype": "FP32",
+                    "shape": list(output_128_bit_np.shape),
+                    "data": [encoded_output]
+                }
+            ]
+        }
+        return response_json
 
     except Exception as e:
         print(f"DEBUG: Inference error in infer endpoint: {e}")
