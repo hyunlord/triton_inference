@@ -32,13 +32,15 @@ def send_inference_request_triton(triton_client, model_name, model_version, batc
     request_start_time = time.time()
     success = False
     try:
+        print(f"DEBUG: Sending request to Triton for batch_size={batch_size}...") # 추가
         response = triton_client.infer(
             model_name=model_name,
             inputs=inputs,
             outputs=outputs,
             model_version=model_version,
-            client_timeout=60.0 # 60초 타임아웃으로 증가
+            client_timeout=60.0
         )
+        print(f"DEBUG: Received response from Triton.") # 추가
         _ = response.as_numpy(f"output_{bit_list_last_element}_bit")
         success = True
     except Exception as e:
