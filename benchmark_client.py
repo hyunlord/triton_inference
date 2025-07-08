@@ -38,8 +38,7 @@ def send_inference_request_triton(triton_client, model_name, model_version, batc
             model_name=model_name,
             inputs=inputs,
             outputs=outputs,
-            model_version=model_version,
-            client_timeout=60.0
+            model_version=model_version
         )
         # Check the last output as a proxy for success
         _ = response.as_numpy(f"output_{bit_list[-1]}_bit")
