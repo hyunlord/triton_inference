@@ -37,7 +37,7 @@ def send_inference_request_triton(triton_client, model_name, model_version, batc
             inputs=inputs,
             outputs=outputs,
             model_version=model_version,
-            client_timeout=10.0
+            client_timeout=60.0 # 60초 타임아웃으로 증가
         )
         _ = response.as_numpy(f"output_{bit_list_last_element}_bit")
         success = True
@@ -121,7 +121,6 @@ def run_benchmark(server_url, model_name, model_version, num_requests, batch_siz
             
             if not fastapi_urls:
                 raise ValueError("No FastAPI worker ports specified or derived.")
-
             print(f"FastAPI worker URLs: {fastapi_urls}")
 
             # 헬스 체크는 첫 번째 URL로만 시도
