@@ -165,8 +165,7 @@ def run_benchmark(server_url, model_name, model_version, num_requests, batch_siz
         ips = total_images_processed / total_duration_sec
         error_rate = (failed_requests / num_requests) * 100 if num_requests > 0 else 0
 
-        print(f"\n--- Benchmark Results ---
-")
+        print(f"\n--- Benchmark Results ---")
         print(f"Total duration: {total_duration_sec:.2f} seconds")
         print(f"Total requests sent: {num_requests}")
         print(f"Successful requests: {successful_requests}")
