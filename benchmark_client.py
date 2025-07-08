@@ -24,10 +24,10 @@ def send_inference_request_triton(triton_client, model_name, model_version, batc
 
     inputs = []
     inputs.append(httpclient.InferInput("images", input_image_data.shape, "FP32"))
-    inputs[0].set_data_from_numpy(input_image_data, binary_data=False) # binary_data=False로 변경
+    inputs[0].set_data_from_numpy(input_image_data, binary_data=True) # binary_data=True로 변경
 
     outputs = []
-    outputs.append(httpclient.InferRequestedOutput(f"output_{bit_list_last_element}_bit", binary_data=False)) # 출력도 False로 변경
+    outputs.append(httpclient.InferRequestedOutput(f"output_{bit_list_last_element}_bit", binary_data=True)) # 출력도 True로 변경
 
     request_start_time = time.time()
     success = False
@@ -101,7 +101,7 @@ def run_benchmark(server_url, model_name, model_version, num_requests, batch_siz
         if server_type == "triton":
             parsed_url = server_url.replace("http://", "").replace("https://", "")
             try:
-                client_instance = httpclient.InferenceServerClient(url=parsed_url, verbose=False)
+                client_instance = httpclient.InferenceServerClient(url=parsed_url, verbose=True) # verbose=True로 변경
             except Exception as client_init_e:
                 print(f"Error initializing Triton client: {client_init_e}")
                 raise
