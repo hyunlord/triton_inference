@@ -50,7 +50,7 @@ class DeepHashingModelForInference(nn.Module):
 config = {
     "dataset_name": "hyunlord/query_image_anchor_positive_large_384",
     "cache_dir": "./.cache",
-    "model_name": "google/siglip2-base-patch16-38",
+    "model_name": "google/siglip2-base-patch16-384",
     "hash_hidden_dim": 512,
     "margin": 0.242047,
     "lambda_ortho": 0.197038,
