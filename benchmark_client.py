@@ -18,38 +18,47 @@ MODEL_VERSION = "1"
 IMAGE_SIZE = 384
 BIT_LIST = [8, 16, 32, 48, 64, 128]
 
-def send_inference_request_triton(triton_client, model_name, model_version, batch_size, image_size, bit_list):
+def send_inference_request_triton(server_url, model_name, model_version, batch_size, image_size, bit_list):
     """Triton Inference Server에 단일 추론 요청을 보내고 지연 시간을 반환합니다."""
-    input_image_data = np.random.rand(batch_size, 3, image_size, image_size).astype(np.float32)
-
-    inputs = []
-    inputs.append(httpclient.InferInput("images", input_image_data.shape, "FP32"))
-    inputs[0].set_data_from_numpy(input_image_data, binary_data=True)
-
-    outputs = []
-    # Request all outputs defined in the model config
-    for bit in bit_list:
-        outputs.append(httpclient.InferRequestedOutput(f"output_{bit}_bit", binary_data=True))
-
-    request_start_time = time.time()
-    success = False
+    # 각 스레드에서 클라이언트 객체를 생성하여 greenlet 스레드 충돌을 방지합니다.
     try:
-        response = triton_client.infer(
-            model_name=model_name,
-            inputs=inputs,
-            outputs=outputs,
-            model_version=model_version
-        )
-        # Check the last output as a proxy for success
-        _ = response.as_numpy(f"output_{bit_list[-1]}_bit")
-        success = True
-    except Exception as e:
-        print(f"An error occurred during benchmark: {e}")
-        success = False
-    request_end_time = time.time()
+        with httpclient.InferenceServerClient(url=server_url, verbose=False) as triton_client:
+            input_image_data = np.random.rand(batch_size, 3, image_size, image_size).astype(np.float32)
 
-    latency_ms = (request_end_time - request_start_time) * 1000
-    return latency_ms, batch_size, success
+            inputs = []
+            inputs.append(httpclient.InferInput("images", input_image_data.shape, "FP32"))
+            inputs[0].set_data_from_numpy(input_image_data, binary_data=True)
+
+            outputs = []
+            # Request all outputs defined in the model config
+            for bit in bit_list:
+                outputs.append(httpclient.InferRequestedOutput(f"output_{bit}_bit", binary_data=True))
+
+            request_start_time = time.time()
+            success = False
+            try:
+                response = triton_client.infer(
+                    model_name=model_name,
+                    inputs=inputs,
+                    outputs=outputs,
+                    model_version=model_version
+                )
+                # Check the last output as a proxy for success
+                _ = response.as_numpy(f"output_{bit_list[-1]}_bit")
+                success = True
+            except Exception as e:
+                # 에러 메시지를 더 명확하게 출력합니다.
+                print(f"An error occurred during inference: {e}")
+                success = False
+            
+            request_end_time = time.time()
+            latency_ms = (request_end_time - request_start_time) * 1000
+            return latency_ms, batch_size, success
+
+    except Exception as e:
+        print(f"Failed to create or use Triton client in thread: {e}")
+        return 0, batch_size, False
+
 
 def send_inference_request_fastapi(server_url_for_worker, model_name, model_version, batch_size, image_size, bit_list_last_element):
     """FastAPI 서버에 단일 추론 요청을 보내고 지연 시간을 반환합니다."""
@@ -91,26 +100,26 @@ def send_inference_request_fastapi(server_url_for_worker, model_name, model_vers
     latency_ms = (request_end_time - request_start_time) * 1000
     return latency_ms, batch_size, success
 
+
 def run_benchmark(server_url, model_name, model_version, num_requests, batch_size, image_size, num_concurrent_clients, server_type, fastapi_worker_ports):
     latencies = deque() # 밀리초 단위
     total_images_processed = 0
     successful_requests = 0
     failed_requests = 0
     
-    client_instance = None
-
     try:
         if server_type == "triton":
             parsed_url = server_url.replace("http://", "").replace("https://", "")
+            # 메인 스레드에서 임시 클라이언트를 생성하여 서버 상태를 확인합니다.
             try:
-                client_instance = httpclient.InferenceServerClient(url=parsed_url, verbose=False) # verbose=True로 변경
+                with httpclient.InferenceServerClient(url=parsed_url, verbose=False) as client:
+                    print(f"Checking server readiness: {client.is_server_ready()}")
+                    print(f"Checking model readiness for {model_name}: {client.is_model_ready(model_name)}")
             except Exception as client_init_e:
-                print(f"Error initializing Triton client: {client_init_e}")
+                print(f"Error initializing Triton client for health check: {client_init_e}")
                 raise
             
             send_request_func = send_inference_request_triton
-            print(f"Checking server readiness: {client_instance.is_server_ready()}")
-            print(f"Checking model readiness for {model_name}: {client_instance.is_model_ready(model_name)}")
         elif server_type == "fastapi":
             send_request_func = send_inference_request_fastapi
             
@@ -154,7 +163,8 @@ def run_benchmark(server_url, model_name, model_version, num_requests, batch_siz
             futures = []
             for i in range(num_requests):
                 if server_type == "triton":
-                    futures.append(executor.submit(send_request_func, client_instance, model_name, model_version, batch_size, image_size, BIT_LIST))
+                    # 각 작업에 client_instance 대신 parsed_url을 전달합니다.
+                    futures.append(executor.submit(send_request_func, parsed_url, model_name, model_version, batch_size, image_size, BIT_LIST))
                 elif server_type == "fastapi":
                     worker_url = fastapi_urls[i % len(fastapi_urls)]
                     futures.append(executor.submit(send_request_func, worker_url, model_name, model_version, batch_size, image_size, BIT_LIST[-1]))
