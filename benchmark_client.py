@@ -92,12 +92,17 @@ def run_benchmark(server_url, model_name, model_version, num_requests, batch_siz
     successful_requests = 0
     failed_requests = 0
     
-    client_instance = None # client_instance 초기화 추가
+    client_instance = None # client_instance 초기화
 
     try:
         if server_type == "triton":
             parsed_url = server_url.replace("http://", "").replace("https://", "")
-            triton_client = httpclient.InferenceServerClient(url=parsed_url, verbose=False)
+            try:
+                client_instance = httpclient.InferenceServerClient(url=parsed_url, verbose=False)
+            except Exception as client_init_e:
+                print(f"Error initializing Triton client: {client_init_e}")
+                raise # 클라이언트 초기화 실패 시 바로 예외 발생
+            
             send_request_func = send_inference_request_triton
             print(f"Checking server readiness: {client_instance.is_server_ready()}")
             print(f"Checking model readiness for {model_name}: {client_instance.is_model_ready(model_name)}")
@@ -160,7 +165,8 @@ def run_benchmark(server_url, model_name, model_version, num_requests, batch_siz
         ips = total_images_processed / total_duration_sec
         error_rate = (failed_requests / num_requests) * 100 if num_requests > 0 else 0
 
-        print(f"\n--- Benchmark Results ---")
+        print(f"\n--- Benchmark Results ---
+")
         print(f"Total duration: {total_duration_sec:.2f} seconds")
         print(f"Total requests sent: {num_requests}")
         print(f"Successful requests: {successful_requests}")
