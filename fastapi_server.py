@@ -50,7 +50,7 @@ class DeepHashingModelForInference(nn.Module):
 config = {
     "dataset_name": "hyunlord/query_image_anchor_positive_large_384",
     "cache_dir": "./.cache",
-    "model_name": "google/siglip2-base-patch16-384",
+    "model_name": "google/siglip2-base-patch16-38",
     "hash_hidden_dim": 512,
     "margin": 0.242047,
     "lambda_ortho": 0.197038,
@@ -100,7 +100,7 @@ async def load_model():
         def validation_step(self, batch, batch_idx): return torch.tensor(0.0)
         def configure_optimizers(self): return torch.optim.AdamW(self.parameters(), lr=0.001)
 
-    checkpoint_path = "/Users/rexxa.som/Downloads/deep_hashing/last.ckpt" # Ensure this path is correct
+    checkpoint_path = "/hanmail/users/rexxa.som/jupyter/my_checkpoints3/last.ckpt" # Ensure this path is correct
 
     try:
         lightning_model = OriginalDeepHashingModel.load_from_checkpoint(checkpoint_path, config=config, map_location='cpu')
