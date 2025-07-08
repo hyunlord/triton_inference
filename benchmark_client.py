@@ -18,21 +18,22 @@ MODEL_VERSION = "1"
 IMAGE_SIZE = 384
 BIT_LIST = [8, 16, 32, 48, 64, 128]
 
-def send_inference_request_triton(triton_client, model_name, model_version, batch_size, image_size, bit_list_last_element):
+def send_inference_request_triton(triton_client, model_name, model_version, batch_size, image_size, bit_list):
     """Triton Inference Server에 단일 추론 요청을 보내고 지연 시간을 반환합니다."""
     input_image_data = np.random.rand(batch_size, 3, image_size, image_size).astype(np.float32)
 
     inputs = []
     inputs.append(httpclient.InferInput("images", input_image_data.shape, "FP32"))
-    inputs[0].set_data_from_numpy(input_image_data, binary_data=True) # binary_data=True로 변경
+    inputs[0].set_data_from_numpy(input_image_data, binary_data=True)
 
     outputs = []
-    outputs.append(httpclient.InferRequestedOutput(f"output_{bit_list_last_element}_bit", binary_data=True)) # 출력도 True로 변경
+    # Request all outputs defined in the model config
+    for bit in bit_list:
+        outputs.append(httpclient.InferRequestedOutput(f"output_{bit}_bit", binary_data=True))
 
     request_start_time = time.time()
     success = False
     try:
-        print(f"DEBUG: Sending request to Triton for batch_size={batch_size}...") # 추가
         response = triton_client.infer(
             model_name=model_name,
             inputs=inputs,
@@ -40,10 +41,11 @@ def send_inference_request_triton(triton_client, model_name, model_version, batc
             model_version=model_version,
             client_timeout=60.0
         )
-        print(f"DEBUG: Received response from Triton.") # 추가
-        _ = response.as_numpy(f"output_{bit_list_last_element}_bit")
+        # Check the last output as a proxy for success
+        _ = response.as_numpy(f"output_{bit_list[-1]}_bit")
         success = True
     except Exception as e:
+        print(f"An error occurred during benchmark: {e}")
         success = False
     request_end_time = time.time()
 
@@ -83,6 +85,7 @@ def send_inference_request_fastapi(server_url_for_worker, model_name, model_vers
         else:
             success = False
     except Exception as e:
+        print(f"An error occurred during benchmark: {e}")
         success = False
     request_end_time = time.time()
 
@@ -152,7 +155,7 @@ def run_benchmark(server_url, model_name, model_version, num_requests, batch_siz
             futures = []
             for i in range(num_requests):
                 if server_type == "triton":
-                    futures.append(executor.submit(send_request_func, client_instance, model_name, model_version, batch_size, image_size, BIT_LIST[-1]))
+                    futures.append(executor.submit(send_request_func, client_instance, model_name, model_version, batch_size, image_size, BIT_LIST))
                 elif server_type == "fastapi":
                     worker_url = fastapi_urls[i % len(fastapi_urls)]
                     futures.append(executor.submit(send_request_func, worker_url, model_name, model_version, batch_size, image_size, BIT_LIST[-1]))
