@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Comparison Results</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f4; }
+        .container { background-color: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); max-width: 900px; margin: 50px auto; }
+        h1 { text-align: center; color: #333; margin-bottom: 30px; }
+        h2 { color: #007bff; margin-top: 25px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+        p { margin-bottom: 10px; line-height: 1.6; }
+        .result-box { background-color: #e9f7ff; border: 1px solid #b3e0ff; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
+        .hash-code-display { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+        .hash-pair { flex: 1 1 45%; min-width: 400px; background-color: #f0f0f0; padding: 10px; border-radius: 4px; }
+        .hash-pair strong { display: block; margin-bottom: 5px; color: #555; }
+        .hash-string { font-family: 'Courier New', monospace; word-break: break-all; }
+        .diff-bit { color: red; font-weight: bold; }
+        .back-link { display: block; text-align: center; margin-top: 30px; font-size: 1.1em; }
+        .back-link a { color: #007bff; text-decoration: none; }
+        .back-link a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Comparison Results</h1>
+
+        <div class="result-box">
+            <h2>Overall Similarity (128-bit Hash)</h2>
+            <p><strong>Hamming Distance:</strong> {{ results.hamming_distance_128_bit }}</p>
+            <p><strong>Similarity:</strong> {{ "%.4f"|format(results.similarity_128_bit) }}</p>
+        </div>
+
+        <h2>Detailed Hash Code Comparison by Bit Length</h2>
+        {% for bit in [8, 16, 32, 48, 64, 128] %}
+            <div class="result-box">
+                <h3>{{ bit }}-bit Hash Comparison</h3>
+                <p><strong>Hamming Distance:</strong> {{ results['hamming_distance_%s_bit'|format(bit)] }}</p>
+                <div class="hash-code-display">
+                    <div class="hash-pair">
+                        <strong>Image 1 Hash:</strong>
+                        <span class="hash-string">{{ results['%s_bit_hash_image1_str'|format(bit)] }}</span>
+                    </div>
+                    <div class="hash-pair">
+                        <strong>Image 2 Hash:</strong>
+                        <span class="hash-string">{{ results['%s_bit_hash_image2_str'|format(bit)] }}</span>
+                    </div>
+                    <div class="hash-pair" style="flex-basis: 100%;">
+                        <strong>Comparison (Image 1 vs Image 2):</strong>
+                        <span class="hash-string">{{ results['%s_bit_compared_html'|format(bit)] | safe }}</span>
+                    </div>
+                </div>
+            </div>
+        {% endfor %}
+
+        <div class="back-link">
+            <a href="/">Compare More Images</a>
+        </div>
+    </div>
+</body>
+</html>

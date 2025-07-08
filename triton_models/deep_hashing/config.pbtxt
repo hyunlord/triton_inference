@@ -1,0 +1,43 @@
+name: "deep_hashing"
+platform: "pytorch_libtorch"
+max_batch_size: 16
+
+input [
+  {
+    name: "images"
+    data_type: TYPE_FP32
+    dims: [ 3, 384, 384 ]
+  }
+]
+output [
+  {
+    name: "output_8_bit"
+    data_type: TYPE_FP32
+    dims: [ 8 ]
+  },
+  {
+    name: "output_16_bit"
+    data_type: TYPE_FP32
+    dims: [ 16 ]
+  },
+  {
+    name: "output_32_bit"
+    data_type: TYPE_FP32
+    dims: [ 32 ]
+  },
+  {
+    name: "output_48_bit"
+    data_type: TYPE_FP32
+    dims: [ 48 ]
+  },
+  {
+    name: "output_64_bit"
+    data_type: TYPE_FP32
+    dims: [ 64 ]
+  },
+  {
+    name: "output_128_bit"
+    data_type: TYPE_FP32
+    dims: [ 128 ]
+  }
+]
