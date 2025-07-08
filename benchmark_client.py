@@ -6,8 +6,8 @@ from collections import deque
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
-import ujson as json # ujson 사용
-from base64 import b64encode, b64decode # b64decode 추가
+import ujson as json
+from base64 import b64encode, b64decode
 
 # Triton 서버 정보 (FastAPI도 이 포맷으로 통신 가능)
 TRITON_SERVER_URL = "localhost:8000"
@@ -38,11 +38,9 @@ def send_inference_request_triton(triton_client, model_name, model_version, batc
             outputs=outputs,
             model_version=model_version
         )
-        # 응답 파싱을 통해 실제 오류 여부 확인
         _ = response.as_numpy(f"output_{bit_list_last_element}_bit")
         success = True
     except Exception as e:
-        # print(f"Triton inference failed: {e}") # 디버깅을 위해 주석 해제 가능
         success = False
     request_end_time = time.time()
 
@@ -75,16 +73,13 @@ def send_inference_request_fastapi(server_url, model_name, model_version, batch_
         response = requests.post(url, headers=headers, data=json.dumps(payload))
         if response.status_code == 200:
             response_json = response.json()
-            # 응답 파싱을 통해 실제 오류 여부 확인
             output_data_json = response_json["outputs"][0]["data"][0]
             decoded_output = b64decode(output_data_json)
             _ = np.frombuffer(decoded_output, dtype=np.float32).reshape(response_json["outputs"][0]["shape"])
             success = True
         else:
-            # print(f"FastAPI server returned non-200 status: {response.status_code} - {response.text}") # 디버깅을 위해 주석 해제 가능
             success = False
     except Exception as e:
-        # print(f"FastAPI request failed: {e}") # 디버깅을 위해 주석 해제 가능
         success = False
     request_end_time = time.time()
 
@@ -96,16 +91,17 @@ def run_benchmark(server_url, model_name, model_version, num_requests, batch_siz
     total_images_processed = 0
     successful_requests = 0
     failed_requests = 0
+    
+    client_instance = None # client_instance 초기화 추가
 
     try:
         if server_type == "triton":
             parsed_url = server_url.replace("http://", "").replace("https://", "")
-            triton_client = httpclient.InferenceServerClient(url=parsed_url, verbose=True) # verbose=True 추가
+            client_instance = httpclient.InferenceServerClient(url=parsed_url, verbose=True)
             send_request_func = send_inference_request_triton
             print(f"Checking server readiness: {client_instance.is_server_ready()}")
             print(f"Checking model readiness for {model_name}: {client_instance.is_model_ready(model_name)}")
         elif server_type == "fastapi":
-            client_instance = None # Dummy for FastAPI
             send_request_func = send_inference_request_fastapi
             try:
                 health_resp = requests.get(f"{server_url}/v2/health/ready")
@@ -149,11 +145,10 @@ def run_benchmark(server_url, model_name, model_version, num_requests, batch_siz
         end_time = time.time()
         total_duration_sec = end_time - start_time
 
-        # Calculate results only if there are successful requests
         if successful_requests > 0:
             all_latencies = np.array(latencies)
             avg_latency_ms = np.mean(all_latencies)
-            std_latency_ms = np.std(all_latencies) # 지연 시간 표준 편차 추가
+            std_latency_ms = np.std(all_latencies)
             p90_latency_ms = np.percentile(all_latencies, 90)
             p95_latency_ms = np.percentile(all_latencies, 95)
             p99_latency_ms = np.percentile(all_latencies, 99)
@@ -173,7 +168,7 @@ def run_benchmark(server_url, model_name, model_version, num_requests, batch_siz
         print(f"Error Rate: {error_rate:.2f}%")
         print(f"Total images processed: {total_images_processed}")
         print(f"Average Latency: {avg_latency_ms:.2f} ms/request")
-        print(f"Standard Deviation of Latency: {std_latency_ms:.2f} ms") # 표준 편차 출력
+        print(f"Standard Deviation of Latency: {std_latency_ms:.2f} ms")
         print(f"P90 Latency: {p90_latency_ms:.2f} ms/request")
         print(f"P95 Latency: {p95_latency_ms:.2f} ms/request")
         print(f"P99 Latency: {p99_latency_ms:.2f} ms/request")
