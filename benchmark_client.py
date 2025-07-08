@@ -30,25 +30,25 @@ def send_inference_request_triton(triton_client, model_name, model_version, batc
     outputs.append(httpclient.InferRequestedOutput(f"output_{bit_list_last_element}_bit", binary_data=True))
 
     request_start_time = time.time()
+    success = False
     try:
         response = triton_client.infer(
             model_name=model_name,
             inputs=inputs,
             outputs=outputs,
             model_version=model_version,
-            client_timeout=10.0 # 10초 타임아웃 추가
+            client_timeout=10.0
         )
         _ = response.as_numpy(f"output_{bit_list_last_element}_bit")
         success = True
     except Exception as e:
-        print(f"Triton inference failed: {e}") # 오류 메시지 출력
         success = False
     request_end_time = time.time()
 
     latency_ms = (request_end_time - request_start_time) * 1000
     return latency_ms, batch_size, success
 
-def send_inference_request_fastapi(server_url, model_name, model_version, batch_size, image_size, bit_list_last_element):
+def send_inference_request_fastapi(server_url_for_worker, model_name, model_version, batch_size, image_size, bit_list_last_element):
     """FastAPI 서버에 단일 추론 요청을 보내고 지연 시간을 반환합니다."""
     input_image_data = np.random.rand(batch_size, 3, image_size, image_size).astype(np.float32)
 
@@ -66,12 +66,12 @@ def send_inference_request_fastapi(server_url, model_name, model_version, batch_
     }
     
     headers = {"Content-Type": "application/json"}
-    url = f"{server_url}/v2/models/{model_name}/versions/{model_version}/infer"
+    url = f"{server_url_for_worker}/v2/models/{model_name}/versions/{model_version}/infer"
 
     request_start_time = time.time()
     success = False
     try:
-        response = requests.post(url, headers=headers, data=json.dumps(payload))
+        response = requests.post(url, headers=headers, data=json.dumps(payload), timeout=10.0) # 타임아웃 추가
         if response.status_code == 200:
             response_json = response.json()
             output_data_json = response_json["outputs"][0]["data"][0]
@@ -87,13 +87,13 @@ def send_inference_request_fastapi(server_url, model_name, model_version, batch_
     latency_ms = (request_end_time - request_start_time) * 1000
     return latency_ms, batch_size, success
 
-def run_benchmark(server_url, model_name, model_version, num_requests, batch_size, image_size, num_concurrent_clients, server_type):
+def run_benchmark(server_url, model_name, model_version, num_requests, batch_size, image_size, num_concurrent_clients, server_type, fastapi_worker_ports):
     latencies = deque() # 밀리초 단위
     total_images_processed = 0
     successful_requests = 0
     failed_requests = 0
     
-    client_instance = None # client_instance 초기화
+    client_instance = None
 
     try:
         if server_type == "triton":
@@ -102,16 +102,32 @@ def run_benchmark(server_url, model_name, model_version, num_requests, batch_siz
                 client_instance = httpclient.InferenceServerClient(url=parsed_url, verbose=False)
             except Exception as client_init_e:
                 print(f"Error initializing Triton client: {client_init_e}")
-                raise # 클라이언트 초기화 실패 시 바로 예외 발생
+                raise
             
             send_request_func = send_inference_request_triton
             print(f"Checking server readiness: {client_instance.is_server_ready()}")
             print(f"Checking model readiness for {model_name}: {client_instance.is_model_ready(model_name)}")
         elif server_type == "fastapi":
             send_request_func = send_inference_request_fastapi
+            
+            # FastAPI 워커 URL 리스트 생성
+            fastapi_urls = []
+            if fastapi_worker_ports:
+                base_host = server_url.split("://")[0] + "://" + server_url.split("://")[1].split(":")[0] # http://localhost
+                for port in fastapi_worker_ports.split(','):
+                    fastapi_urls.append(f"{base_host}:{port.strip()}")
+            else:
+                fastapi_urls.append(server_url)
+            
+            if not fastapi_urls:
+                raise ValueError("No FastAPI worker ports specified or derived.")
+
+            print(f"FastAPI worker URLs: {fastapi_urls}")
+
+            # 헬스 체크는 첫 번째 URL로만 시도
             try:
-                health_resp = requests.get(f"{server_url}/v2/health/ready")
-                model_health_resp = requests.get(f"{server_url}/v2/models/{model_name}/ready")
+                health_resp = requests.get(f"{fastapi_urls[0]}/v2/health/ready")
+                model_health_resp = requests.get(f"{fastapi_urls[0]}/v2/models/{model_name}/ready")
                 print(f"Checking server readiness (FastAPI): {health_resp.status_code == 200}")
                 print(f"Checking model readiness for {model_name} (FastAPI): {model_health_resp.status_code == 200}")
             except Exception as e:
@@ -122,7 +138,7 @@ def run_benchmark(server_url, model_name, model_version, num_requests, batch_siz
 
         print(f"\n--- Starting Benchmark ---")
         print(f"Server Type: {server_type.upper()}")
-        print(f"Server URL: {server_url}")
+        print(f"Server URL(s): {server_url if server_type == 'triton' else fastapi_urls}") # 출력 변경
         print(f"Model: {model_name}, Version: {model_version}")
         print(f"Number of requests: {num_requests}")
         print(f"Batch size per request: {batch_size}")
@@ -133,11 +149,12 @@ def run_benchmark(server_url, model_name, model_version, num_requests, batch_siz
 
         with ThreadPoolExecutor(max_workers=num_concurrent_clients) as executor:
             futures = []
-            for _ in range(num_requests):
+            for i in range(num_requests):
                 if server_type == "triton":
                     futures.append(executor.submit(send_request_func, client_instance, model_name, model_version, batch_size, image_size, BIT_LIST[-1]))
                 elif server_type == "fastapi":
-                    futures.append(executor.submit(send_request_func, server_url, model_name, model_version, batch_size, image_size, BIT_LIST[-1]))
+                    worker_url = fastapi_urls[i % len(fastapi_urls)]
+                    futures.append(executor.submit(send_request_func, worker_url, model_name, model_version, batch_size, image_size, BIT_LIST[-1]))
 
             for future in tqdm(as_completed(futures), total=num_requests, desc="Benchmarking"):
                 latency_ms, processed_batch_size, success = future.result()
@@ -166,7 +183,8 @@ def run_benchmark(server_url, model_name, model_version, num_requests, batch_siz
         ips = total_images_processed / total_duration_sec
         error_rate = (failed_requests / num_requests) * 100 if num_requests > 0 else 0
 
-        print(f"\n--- Benchmark Results ---")
+        print(f"\n--- Benchmark Results ---
+")
         print(f"Total duration: {total_duration_sec:.2f} seconds")
         print(f"Total requests sent: {num_requests}")
         print(f"Successful requests: {successful_requests}")
@@ -202,7 +220,9 @@ if __name__ == "__main__":
                         help="Number of concurrent clients (threads) to simulate concurrent requests")
     parser.add_argument("--server_type", type=str, choices=["triton", "fastapi"], required=True,
                         help="Type of server to benchmark: 'triton' or 'fastapi'")
+    parser.add_argument("--fastapi_worker_ports", type=str, default="",
+                        help="Comma-separated list of ports for FastAPI workers (e.g., '8000,8001,8002,8003'). Only used with --server_type fastapi.")
     args = parser.parse_args()
 
     run_benchmark(args.server_url, args.model_name, args.model_version,
-                  args.num_requests, args.batch_size, args.image_size, args.num_concurrent_clients, args.server_type)
+                  args.num_requests, args.batch_size, args.image_size, args.num_concurrent_clients, args.server_type, args.fastapi_worker_ports)
