@@ -45,7 +45,9 @@ def run_benchmark(server_url, model_name, model_version, num_requests, batch_siz
     total_images_processed = 0
 
     try:
-        triton_client = httpclient.InferenceServerClient(url=server_url)
+        # URL에서 스킴 제거
+        parsed_url = server_url.replace("http://", "").replace("https://", "")
+        triton_client = httpclient.InferenceServerClient(url=parsed_url)
 
         # 서버 및 모델 상태 확인 (선택 사항)
         print(f"Checking server readiness: {triton_client.is_server_ready()}")
