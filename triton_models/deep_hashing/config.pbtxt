@@ -48,3 +48,7 @@ instance_group [
     gpus: [ 0, 1, 2, 3 ]
   }
 ]
+dynamic_batching {
+  max_queue_delay_microseconds: 100000
+  preferred_batch_size: [ 4, 8, 16 ]
+}
