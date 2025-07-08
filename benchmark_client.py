@@ -30,7 +30,6 @@ def send_inference_request_triton(triton_client, model_name, model_version, batc
     outputs.append(httpclient.InferRequestedOutput(f"output_{bit_list_last_element}_bit", binary_data=True))
 
     request_start_time = time.time()
-    success = False
     try:
         response = triton_client.infer(
             model_name=model_name,
